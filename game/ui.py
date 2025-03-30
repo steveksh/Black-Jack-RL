@@ -4,6 +4,9 @@ from PIL import Image, ImageTk
 import time 
 import os 
 
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+
 # Black Jack Env
 from GameEngine import GameEngine
 
@@ -13,8 +16,12 @@ class BlackjackUI:
         self.root.title("Blackjack RL - SDSC6007")
         self.root.geometry("1400x900")
 
+        # utils
+        self.rank_map = {1: 'ace'}
+        self.winnings = []
+
         # Load the background image
-        self.original_bg = Image.open("images/background.gif")
+        self.original_bg = Image.open("images/background2.png")
 
         # Load card images 
         self.card_images = self.load_card_images("images")
@@ -24,8 +31,7 @@ class BlackjackUI:
         self.coin_image_blue = self._load_coin_image("images/blue-chip.png", (40, 40))
 
         # Game Status Mapper: 
-        self.status_mapper = {1:'You Won!', 
-                              0: 'You Lost...'}
+        self.status_mapper = {1:'✨✨ You Won ✨✨', 0: '💸💸 You Lost'}
         
         # Avatars 
         self.avatars = self.load_avatar("images")
@@ -33,17 +39,16 @@ class BlackjackUI:
         # Bills
         # self.bills = self._load_coin_image("images/bills.png", (200, 200))
 
+        # arrow 
+        self.arrow_image = self._load_coin_image("images/red-left arrow.png", (100, 100))
+
         # Game engine
         self.engine = GameEngine()
         self.obs = self.engine.obs
 
         # Layout
         self.setup_layout()
-
-        # utils
-        self.rank_map = {1: 'ace'}
-        self.winnings = []
-
+    
     def load_avatar(self, folder):
         images = {}
         for filename in os.listdir(folder):
@@ -87,6 +92,10 @@ class BlackjackUI:
         self.log_text = tk.Text(self.log_frame, height=20, bg="black", fg="white", font=("Roboto", 12))
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
+        # right frames
+        self.dealer_bar_frame = ttk.LabelFrame(self.root, text="Dealer Card Distribution")
+        self.dealer_bar_frame.place(relx=0.62, rely=0.01, relwidth=0.37, relheight=0.3)
+
         # Hit button
         self.hit_button = tk.Button(
             self.table_frame,
@@ -124,6 +133,7 @@ class BlackjackUI:
 
         # Keep a reference to avoid garbage collection
         self.table_canvas.image = self.avatars['losing_streak_avatar']
+        self.draw_dealer_distribution()
     
     def draw_game_state(self, event):
         """ This function is used to draw the game state at launch"""
@@ -151,8 +161,27 @@ class BlackjackUI:
             self.create_text(canvas_width, canvas_height, info_text)
 
         self.display_cards()
+        self.draw_dealer_distribution()
+
+    def update_arrow(self,mode='dealer'):
+        self.table_canvas.delete("arrow")
+
+        canvas_width = self.table_canvas.winfo_width()
+        canvas_height = self.table_canvas.winfo_height()
+
+        if mode == 'dealer':
+            self.table_canvas.create_image(canvas_width*0.9, 
+                                        canvas_height*0.2, 
+                                        image=self.arrow_image, 
+                                        tags="arrow")
+        else:
+            self.table_canvas.create_image(canvas_width*0.9, 
+                                        canvas_height*0.75, 
+                                        image=self.arrow_image, 
+                                        tags="arrow")
 
     def display_cards(self):
+
         self.table_canvas.delete("player-cards")
         self.table_canvas.delete("dealer-cards")
 
@@ -245,21 +274,25 @@ class BlackjackUI:
             # self.log_text.insert(tk.END, f"Game Over — BUST! (Reward: {reward})\n")
             # self.log_text.see(tk.END)
             self.logger(f"Game Over — BUST! (Reward: {reward})\n")
+            self.logger(f"{'--'}"*50 + '\n')
 
             self.winnings.append(reward)
 
             self.engine._new_game()
             info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}"
             self.refresh_layout(info_text, mode='sys')
+            self.update_arrow('player')
 
         # If terminated, show dealer's full hand one card at a time (with delay)
         if terminated and player_sum <= 21:
             self.hit_button.config(state="disabled")
             self.stick_button.config(state="disabled")
             
+            
             # self.log_text.insert(tk.END, "\nDealer's Hand Revealed:\n")
             # self.log_text.see(tk.END)
             self.logger("\nDealer's Hand Revealed:\n")
+            self.update_arrow('dealer')
 
             revealed_cards = []
             for idx, card in enumerate(self.engine.dealer_hand):
@@ -286,16 +319,37 @@ class BlackjackUI:
             # self.log_text.insert(tk.END, f"\nGame Over — {result_text} (Reward: {reward})\n")
             # self.log_text.see(tk.END)
             self.logger(f"\nGame Over — {result_text} (Reward: {reward})\n")
+            self.logger(f"{'--'}"*50 + '\n')
             
             self.engine._new_game()
             time.sleep(0.5)
             self.refresh_layout(info_text, mode='sys')
+            self.update_arrow('player')
 
         self.hit_button.config(state="active")
         self.stick_button.config(state="active")
 
-        self.logger(f"{'--'}"*50 + '\n')
-        return True
+    def draw_dealer_distribution(self):
+        # If a chart already exists, destroy it first
+        if hasattr(self, 'dealer_chart_canvas'):
+            self.dealer_chart_canvas.get_tk_widget().destroy()
+
+        # Create the figure and plot
+        fig, ax = plt.subplots(figsize=(5, 2.5), dpi=10)
+        ax.plot(self.winnings, marker='o', linestyle='-', color='green')
+        ax.set_title("Dealer Top Card Over Time")
+        ax.set_xlabel("Round")
+        ax.set_ylabel("Card Value")
+        ax.grid(True)
+
+        # Embed the plot in the Tkinter frame
+        canvas = FigureCanvasTkAgg(fig, master=self.dealer_bar_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        # Save reference
+        self.dealer_chart_canvas = canvas
+
 
     def create_text(self, canvas_width, canvas_height, info_text):
         self.table_canvas.create_text(
@@ -315,17 +369,35 @@ class BlackjackUI:
         self.table_canvas.create_image(0, 0, image=self.bg_image, anchor="nw", tags="background")
 
         # Coins
-        self.table_canvas.create_image(event.width/8, event.height/6, anchor=tk.CENTER, image=self.coin_image_blue, tags="coin")
-        self.table_canvas.create_image(event.width/8 + 50, event.height/6, anchor=tk.CENTER, image=self.coin_image_red, tags="coin")
-        self.table_canvas.create_image(event.width - 200, event.height - 150, anchor=tk.CENTER, image=self.coin_image_blue, tags="coin")
-        self.table_canvas.create_image(event.width - 200 + 50, event.height - 150 , anchor=tk.CENTER, image=self.coin_image_red, tags="coin")
+        # self.table_canvas.create_image(event.width/8, event.height/6, anchor=tk.CENTER, image=self.coin_image_blue, tags="coin")
+        # self.table_canvas.create_image(event.width/8 + 50, event.height/6, anchor=tk.CENTER, image=self.coin_image_red, tags="coin")
+        # self.table_canvas.create_image(event.width - 200, event.height - 150, anchor=tk.CENTER, image=self.coin_image_blue, tags="coin")
+        # self.table_canvas.create_image(event.width - 200 + 50, event.height - 150 , anchor=tk.CENTER, image=self.coin_image_red, tags="coin")
+
+        # avatar
+        # Avatar Frame (top-right middle)
+        self.avatar_frame = ttk.LabelFrame(self.root, text="Winnings Trend")
+        self.avatar_frame.place(relx=0.62, rely=0.32, relwidth=0.37, relheight=0.3)
+
+        # Load image and display it
+        img = Image.open("images/losing_streak_avatar.png").resize((200, 200))
+        avatar_img = ImageTk.PhotoImage(img)
+        avatar_label = tk.Label(self.avatar_frame, image=avatar_img)        
+        avatar_label.image = avatar_img
+        avatar_label.pack(expand=True)
 
         # Bills
         # self.table_canvas.create_image(event.width/2, event.height/2, anchor=tk.CENTER, image=self.bills, tags="bills")
 
+        # Arrow 
+        self.table_canvas.create_image(event.width*0.9, 
+                                       event.height*0.75, 
+                                       image=self.arrow_image, 
+                                       tags="arrow")
+
         # Observation display
         self.draw_game_state(event)
-
+        self.draw_dealer_distribution()
 
 if __name__ == "__main__":
     root = tk.Tk()
