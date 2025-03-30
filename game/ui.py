@@ -133,7 +133,7 @@ class BlackjackUI:
 
         # Keep a reference to avoid garbage collection
         self.table_canvas.image = self.avatars['losing_streak_avatar']
-        self.draw_dealer_distribution()
+        # self.draw_dealer_distribution()
     
     def draw_game_state(self, event):
         """ This function is used to draw the game state at launch"""
@@ -161,7 +161,7 @@ class BlackjackUI:
             self.create_text(canvas_width, canvas_height, info_text)
 
         self.display_cards()
-        self.draw_dealer_distribution()
+        # self.draw_dealer_distribution()
 
     def update_arrow(self,mode='dealer'):
         self.table_canvas.delete("arrow")
@@ -380,11 +380,11 @@ class BlackjackUI:
         self.avatar_frame.place(relx=0.62, rely=0.32, relwidth=0.37, relheight=0.3)
 
         # Load image and display it
-        img = Image.open("images/losing_streak_avatar.png").resize((200, 200))
-        avatar_img = ImageTk.PhotoImage(img)
-        avatar_label = tk.Label(self.avatar_frame, image=avatar_img)        
-        avatar_label.image = avatar_img
-        avatar_label.pack(expand=True)
+        # img = Image.open("images/losing_streak_avatar.png").resize((200, 200))
+        # avatar_img = ImageTk.PhotoImage(img)
+        # avatar_label = tk.Label(self.avatar_frame, image=avatar_img)        
+        # avatar_label.image = avatar_img
+        # avatar_label.pack(expand=True)
 
         # Bills
         # self.table_canvas.create_image(event.width/2, event.height/2, anchor=tk.CENTER, image=self.bills, tags="bills")
@@ -397,7 +397,7 @@ class BlackjackUI:
 
         # Observation display
         self.draw_game_state(event)
-        self.draw_dealer_distribution()
+        # self.draw_dealer_distribution()
 
 if __name__ == "__main__":
     root = tk.Tk()
