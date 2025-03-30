@@ -24,7 +24,7 @@ class BlackjackUI:
 
         # utils
         self.rank_map = {1: 'ace'}
-        self.winnings = []
+        self.winnings = [0]
 
         # Load the background image
         self.original_bg = Image.open("images/background6.png")
@@ -46,7 +46,7 @@ class BlackjackUI:
         # self.bills = self._load_coin_image("images/bills.png", (200, 200))
 
         # arrow 
-        self.arrow_image = self._load_coin_image("images/red-left arrow.png", (100, 100))
+        self.arrow_image = self._load_coin_image("images/red-left arrow.png", (80, 40))
         
 
         # Game engine
@@ -65,7 +65,77 @@ class BlackjackUI:
                 key = filename.replace(".png", "")
                 images[key] = ImageTk.PhotoImage(img)
         return images
+    
+    def show_endgame_screen(self, result_text):
+        self.table_canvas.itemconfigure("arrow", state="hidden")
 
+
+        # Disable buttons
+        # Draw overlay
+        canvas_width = self.table_canvas.winfo_width()
+        canvas_height = self.table_canvas.winfo_height()
+
+        self.overlay = self.table_canvas.create_rectangle(
+            0, 0, canvas_width, canvas_height,
+            fill="grey", stipple="gray50", tags="endgame"
+        )
+
+        # Banner image
+        image_path_map = {
+            '✨✨ You Won ✨✨': "images/win.png",
+            '💸💸 You Lost': "images/lose.png",
+            'Push (draw)': "images/lose.png"
+        }
+        result_img_path = image_path_map.get(result_text, "images/lose.png")
+        img = Image.open(result_img_path).resize((500, 500))
+        self.result_image = ImageTk.PhotoImage(img)
+
+        self.result_img_id = self.table_canvas.create_image(
+            canvas_width // 2,
+            canvas_height // 2 - 100,
+            image=self.result_image,
+            tags="endgame"
+        )
+
+        # Countdown
+        self.countdown_text = self.table_canvas.create_text(
+            canvas_width // 2,
+            canvas_height // 2 + 180,
+            text="Next game in 3...",
+            fill="black",
+            font=("Roboto", 30, "bold"),
+            tags="endgame"
+        )
+
+        # Bring overlay to front
+        self.table_canvas.tag_raise("endgame")
+        self.countdown_timer(3)
+
+    def countdown_timer(self, seconds):
+        if seconds > 0:
+            self.table_canvas.itemconfigure(self.countdown_text, text=f"Next game in {seconds}...")
+            self.root.after(1000, lambda: self.countdown_timer(seconds - 1))
+        else:
+            self.hide_endgame_screen()
+            self.engine._new_game()
+            
+            player_sum, dealer_card = self.engine.obs[0], self.engine.obs[1]
+            info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}"
+            self.refresh_layout(info_text, mode='sys')
+            self.update_arrow('player')
+
+    def hide_endgame_screen(self):
+        self.table_canvas.delete("endgame")
+
+        # Re-show everything
+        self.table_canvas.itemconfigure("player-cards", state="normal")
+        self.table_canvas.itemconfigure("dealer-cards", state="normal")
+        self.table_canvas.itemconfigure("arrow", state="normal")
+        self.table_canvas.itemconfigure("state", state="normal")
+
+        self.hit_button.config(state="active")
+        self.stick_button.config(state="active")
+        self.policy_button.config(state="active")
 
     def load_card_images(self, folder):
         images = {}
@@ -302,27 +372,22 @@ class BlackjackUI:
         self.refresh_layout(info_text)
 
         # If the game is over due to busting
-        if action == 1 and terminated and player_sum > 21:
-            # self.log_text.insert(tk.END, f"Game Over — BUST! (Reward: {reward})\n")
-            # self.log_text.see(tk.END)
+        if player_sum > 21:
+            self.hit_button.config(state="disabled")
+            self.stick_button.config(state="disabled")
+
             self.logger(f"Game Over — BUST! (Reward: {reward})\n")
             self.logger(f"{'--'}"*50 + '\n')
 
             self.winnings.append(reward)
 
-            self.engine._new_game()
-            info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}"
-            self.refresh_layout(info_text, mode='sys')
-            self.update_arrow('player')
+            self.show_endgame_screen('💸💸 You Lost')
 
         # If terminated, show dealer's full hand one card at a time (with delay)
         if terminated and player_sum <= 21:
             self.hit_button.config(state="disabled")
             self.stick_button.config(state="disabled")
             
-            
-            # self.log_text.insert(tk.END, "\nDealer's Hand Revealed:\n")
-            # self.log_text.see(tk.END)
             self.logger("\nDealer's Hand Revealed:\n")
             self.update_arrow('dealer')
 
@@ -335,10 +400,6 @@ class BlackjackUI:
                 info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_hand_text}"
                 self.refresh_layout(info_text)
                 self.dealer_reveal(revealed_cards)
-
-                # Log each card
-                # self.log_text.insert(tk.END, f"{card}\n")
-                # self.log_text.see(tk.END)
                 self.logger(f"{card}\n")
 
                 self.root.update()
@@ -348,8 +409,6 @@ class BlackjackUI:
             result_text = self.status_mapper.get(reward, 'Push (draw)')
             self.winnings.append(reward)
 
-            # self.log_text.insert(tk.END, f"\nGame Over — {result_text} (Reward: {reward})\n")
-            # self.log_text.see(tk.END)
             self.logger(f"\nGame Over — {result_text} (Reward: {reward})\n")
             self.logger(f"{'--'}"*50 + '\n')
             
