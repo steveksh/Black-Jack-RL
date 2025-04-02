@@ -86,7 +86,7 @@ class BlackjackUI:
         image_path_map = {
             '✨✨ You Won ✨✨': "images/win.png",
             '💸💸 You Lost': "images/lose.png",
-            'Push (draw)': "images/lose.png"
+            'Push (draw)': "images/push.png"
         }
         result_img_path = image_path_map.get(result_text, "images/lose.png")
         img = Image.open(result_img_path).resize((550, 550))
