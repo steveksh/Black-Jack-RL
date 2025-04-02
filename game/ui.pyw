@@ -1,15 +1,20 @@
-# import customtkinter
-import tkinter as tk
-from tkinter import font as tkfont
-from tkinter import ttk
-from PIL import Image, ImageTk
 import time 
-import numpy as np
 import os 
 import sys
+import json 
+import random 
+
+import numpy as np
+
+import tkinter as tk
+from tkinter import ttk
+from PIL import Image, ImageTk
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+
+import seaborn as sns
 
 # Black Jack Env
 from GameEngine import GameEngine
@@ -19,8 +24,22 @@ class BlackjackUI:
         self.root = root
 
         self.root.title("Blackjack RL - SDSC6007")
-        self.root.geometry("1500x700")
+        self.root.geometry("1500x900")
         self.root.protocol("WM_DELETE_WINDOW", lambda: (self.root.destroy(), sys.exit()))
+        
+        # RL Algorithms 
+        self.policy_options = [("Random Policy", "Random_Policy"),
+                               ("Q-Learning", "Q_learning"),
+                               ("Deep Q Learning", "Deep_Q_learning"),
+                               ("Policy Gradient Actor + Critic", "AC_Policy_Gradient"),
+                               ("Policy Gradient (batch updates)", "Batch_Policy_Gradient"),
+                               ("TRPO", "TRPO"),
+                               ("PPO", "PPO"),
+                               ("Basic Strategy", "basic_strategy")]
+        
+        # Load an initial Random Policy 
+        with open(f'./policies/Random_Policy.json', 'r') as f:
+            self.q = json.load(f)
 
         # utils
         self.rank_map = {1: 'ace'}
@@ -39,36 +58,19 @@ class BlackjackUI:
         # Game Status Mapper: 
         self.status_mapper = {1:'✨✨ You Won ✨✨', 0: '💸💸 You Lost'}
         
-        # Avatars 
-        self.avatars = self.load_avatar("images")
-
-        # Bills
-        # self.bills = self._load_coin_image("images/bills.png", (200, 200))
-
         # arrow 
         self.arrow_image = self._load_coin_image("images/red-left arrow.png", (80, 40))
         
-
         # Game engine
         self.engine = GameEngine()
         self.obs = self.engine.obs
 
         # Layout
         self.setup_layout()
-    
-    def load_avatar(self, folder):
-        images = {}
-        for filename in os.listdir(folder):
-            if filename.endswith(".png") and "avatar" in filename:
-                path = os.path.join(folder, filename)
-                img = Image.open(path).resize((250, 250))
-                key = filename.replace(".png", "")
-                images[key] = ImageTk.PhotoImage(img)
-        return images
-    
-    def show_endgame_screen(self, result_text):
-        self.table_canvas.itemconfigure("arrow", state="hidden")
 
+    def show_endgame_screen(self, result_text):
+        self.hit_button.config(state="disabled")
+        self.stick_button.config(state="disabled")
 
         # Disable buttons
         # Draw overlay
@@ -87,12 +89,12 @@ class BlackjackUI:
             'Push (draw)': "images/lose.png"
         }
         result_img_path = image_path_map.get(result_text, "images/lose.png")
-        img = Image.open(result_img_path).resize((500, 500))
+        img = Image.open(result_img_path).resize((550, 550))
         self.result_image = ImageTk.PhotoImage(img)
 
         self.result_img_id = self.table_canvas.create_image(
             canvas_width // 2,
-            canvas_height // 2 - 100,
+            canvas_height // 2 - 90,
             image=self.result_image,
             tags="endgame"
         )
@@ -100,8 +102,8 @@ class BlackjackUI:
         # Countdown
         self.countdown_text = self.table_canvas.create_text(
             canvas_width // 2,
-            canvas_height // 2 + 180,
-            text="Next game in 3...",
+            canvas_height // 2 + 170,
+            text="NEXT GAME IN 3...",
             fill="black",
             font=("Roboto", 30, "bold"),
             tags="endgame"
@@ -113,9 +115,16 @@ class BlackjackUI:
 
     def countdown_timer(self, seconds):
         if seconds > 0:
-            self.table_canvas.itemconfigure(self.countdown_text, text=f"Next game in {seconds}...")
+            self.table_canvas.itemconfigure(self.countdown_text, text=f"NEXT GAME IN {seconds}...")
             self.root.after(1000, lambda: self.countdown_timer(seconds - 1))
+
+            self.hit_button.config(state="disable")
+            self.stick_button.config(state="disable")
+            self.policy_button.config(state="disable")
         else:
+            self.table_canvas.itemconfigure(self.countdown_text, text="Starting new game...")
+
+            # Re-enable buttons or reset game state here
             self.hide_endgame_screen()
             self.engine._new_game()
             
@@ -123,6 +132,11 @@ class BlackjackUI:
             info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}"
             self.refresh_layout(info_text, mode='sys')
             self.update_arrow('player')
+
+            # Re-enable buttons if needed
+            self.hit_button.config(state="normal")
+            self.stick_button.config(state="normal")
+            self.policy_button.config(state="normal")
 
     def hide_endgame_screen(self):
         self.table_canvas.delete("endgame")
@@ -168,9 +182,29 @@ class BlackjackUI:
         self.trend = ttk.LabelFrame(self.root, text="Cumulative Winnings")
         self.trend.place(relx=0.62, rely=0.01, relwidth=0.37, relheight=0.4)
 
-        # Dealer Card Distribution – Keep it similar
-        self.dealer_bar_frame = ttk.LabelFrame(self.root, text="Dealer Card Distribution")
+        self.dealer_bar_frame = ttk.LabelFrame(self.root, text="Optimized Policy Selection")
         self.dealer_bar_frame.place(relx=0.62, rely=0.42, relwidth=0.37, relheight=0.28)
+        self.dealer_bar_frame.configure(style="White.TLabelframe")
+
+        self.radio_frame = ttk.Frame(self.dealer_bar_frame, style="White.TFrame")
+        self.radio_frame.pack(side="left", fill="y", padx=5, pady=5)
+
+        self.plot_frame = ttk.Frame(self.dealer_bar_frame, style="White.TFrame")
+        self.plot_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+
+        self.option_var = tk.StringVar(value="Random_Policy")  # default option
+
+        # Define the policy options
+        # Add radio buttons inside the dealer_bar_frame
+        for text, value in self.policy_options:
+            rb = ttk.Radiobutton(
+                self.radio_frame,
+                text=text,
+                variable=self.option_var,
+                value=value,
+                command=self.update_option
+            )
+            rb.pack(anchor="w", pady=2)
 
         # Game Log – Make it shorter
         self.log_frame = ttk.LabelFrame(self.root, text="Game Log")
@@ -210,10 +244,8 @@ class BlackjackUI:
         )
         self.stick_button.place(relx=0.4, rely=0.9, relwidth=0.2, relheight=0.06)
         self.stick_button.config(command=lambda: self.handle_action(0))
-
         
         # Policy 
-        # Replace tk.Button with this:
         self.policy_button = tk.Button(
             self.table_frame,
             text="Q*(S, A)",
@@ -224,23 +256,91 @@ class BlackjackUI:
             cursor="hand2"              # Hand cursor on hover
         )
         self.policy_button.place(relx=0.65, rely=0.9, relwidth=0.2, relheight=0.06)
-        # self.policy_button.config(command=lambda: self.handle_action(0))
+        self.policy_button.config(command=lambda: self.use_policy())
 
-        # Avatars 
-        # self.avatar_image_id = self.table_canvas.create_image(
-        #     250, 100,  # x, y position within the canvas — adjust as needed
-        #     anchor="ne",
-        #     image=self.avatars['losing_streak_avatar']
-        # )
+    def use_policy(self):
+        """ Function used to use the selected policy """
 
-        # Keep a reference to avoid garbage collection
-        # self.table_canvas.image = self.avatars['losing_streak_avatar']
-        # self.draw_dealer_distribution()
+        # extract the state information from the game 
+        state = self.engine.obs
+        print(self.q.get(str(state)))
+        action = self.q.get(str(state), random.choice([0,1]))
+
+        action_mapper = {1: 'hit', 0: 'stick'}
+        self.logger(f'Optimized policy says to: {action_mapper.get(action)}\n')
+
+        self.handle_action(action)
+
+        return True
+    
+    def update_option(self):
+        """ Updated selections """
+        selected = self.option_var.get()
+        self.option = selected  # update internal policy variable
+        self.logger(f"[INFO] Selected policy: {self.option}\n")
+
+        # update plots 
+        self.policy = np.load(f'./checkpoints/{selected}.npy')
+        self.grid_plots(selected, self.policy)
+
+        # load optimized policy         
+        with open(f'./policies/{selected}.json', 'r') as f:
+            self.q = json.load(f)
+
+    def grid_plots(self, title, policy_grid):
+        fig, ax = plt.subplots(figsize=(4, 2.5))  # Smaller and wider
+
+        # Set figure and axis background to black
+        fig.patch.set_facecolor("black")
+        ax.set_facecolor("black")
+
+        ax = sns.heatmap(
+            policy_grid,
+            linewidth=0,
+            annot=True,
+            cmap="Accent_r",
+            cbar=False,
+            ax=ax,
+            annot_kws={"size": 8}
+        )
+
+        ax.set_title(f"Policy: {title}", fontsize=10)
+        ax.set_xlabel("Player sum", fontsize=9)
+        ax.set_ylabel("Dealer showing", fontsize=9)
+        ax.set_xticklabels(range(12, 22), fontsize=8)
+        ax.set_yticklabels(["A"] + list(range(2, 11)), fontsize=8)
+
+        # Tighter layout and no figure padding
+        fig.tight_layout(pad=0.7)
+
+        # Optional: transparent background (depends on visual preference)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
+
+        # Optional: custom legend
+        legend_elements = [
+            Patch(facecolor="lightgreen", edgecolor="black", label="Hit"),
+            Patch(facecolor="grey", edgecolor="black", label="Stick"),
+        ]
+        ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=7)
+
+        self.show_plot_in_frame(fig)
+
+    def show_plot_in_frame(self, fig):
+        # Remove previous canvas
+        if hasattr(self, "current_canvas") and self.current_canvas:
+            self.current_canvas.get_tk_widget().destroy()
+
+        # Show new figure in the dedicated plot frame
+        self.current_canvas = FigureCanvasTkAgg(fig, master=self.plot_frame)
+        self.current_canvas.draw()
+        self.current_canvas.get_tk_widget().pack(fill="both", expand=True)
+
     
     def draw_game_state(self, event):
         """ This function is used to draw the game state at launch"""
         player_sum, dealer_card, usable_ace = self.obs
-        info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}"
+        info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}\n"
         self.refresh_layout(info_text, mode = 'sys')
         self.display_cards()
 
@@ -256,7 +356,7 @@ class BlackjackUI:
         if mode == 'sys':
             self.obs = self.engine.obs
             player_sum, dealer_card, usable_ace = self.obs
-            info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}"
+            info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}\n"
             self.create_text(canvas_width, canvas_height, info_text)
             self.draw_dealer_distribution()
             
@@ -369,22 +469,21 @@ class BlackjackUI:
 
         # Display player's current state
         info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}"
+        self.logger(info_text)
         self.refresh_layout(info_text)
 
         # If the game is over due to busting
         if player_sum > 21:
-            self.hit_button.config(state="disabled")
-            self.stick_button.config(state="disabled")
-
+            self.show_endgame_screen('💸💸 You Lost')
             self.logger(f"Game Over — BUST! (Reward: {reward})\n")
             self.logger(f"{'--'}"*50 + '\n')
 
             self.winnings.append(reward)
 
-            self.show_endgame_screen('💸💸 You Lost')
-
+            return True
+            
         # If terminated, show dealer's full hand one card at a time (with delay)
-        if terminated and player_sum <= 21:
+        elif terminated and player_sum <= 21:
             self.hit_button.config(state="disabled")
             self.stick_button.config(state="disabled")
             
@@ -397,7 +496,7 @@ class BlackjackUI:
 
                 # Update canvas with new dealer info
                 dealer_hand_text = ", ".join(str(c) for c in revealed_cards)
-                info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_hand_text}"
+                info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_hand_text} | Dealer Sum: {np.sum(revealed_cards)}\n"
                 self.refresh_layout(info_text)
                 self.dealer_reveal(revealed_cards)
                 self.logger(f"{card}\n")
@@ -412,13 +511,9 @@ class BlackjackUI:
             self.logger(f"\nGame Over — {result_text} (Reward: {reward})\n")
             self.logger(f"{'--'}"*50 + '\n')
             
-            self.engine._new_game()
-            time.sleep(0.5)
-            self.refresh_layout(info_text, mode='sys')
-            self.update_arrow('player')
+            self.show_endgame_screen(result_text)
 
-        self.hit_button.config(state="active")
-        self.stick_button.config(state="active")
+            return True
 
     def draw_dealer_distribution(self):
         # Clear old canvas if it exists
@@ -488,8 +583,6 @@ class BlackjackUI:
         self.table_canvas.delete("all")
         self.table_canvas.create_image(0, 0, image=self.bg_image, anchor="nw", tags="background")
 
-        # Bills
-        # self.table_canvas.create_image(event.width/2, event.height/2, anchor=tk.CENTER, image=self.bills, tags="bills")
 
         # Arrow 
         self.table_canvas.create_image(event.width*0.9, 

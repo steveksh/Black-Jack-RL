@@ -80,3 +80,29 @@ def create_plots(value_grid, policy_grid, title: str):
     ]
     ax2.legend(handles=legend_elements, bbox_to_anchor=(1.3, 1))
     return fig
+
+
+def ui_create_plots(value_grid, policy_grid, title: str):
+    """Creates a plot using a value and policy grid."""
+    # create a new figure with 2 subplots (left: state values, right: policy)
+    player_count, dealer_count, value = value_grid
+    fig = plt.figure(figsize=plt.figaspect(0.4))
+    fig.suptitle(title, fontsize=16)
+
+    # plot the state values
+    # plot the policy
+    fig.add_subplot(1, 2, 2)
+    ax2 = sns.heatmap(policy_grid, linewidth=0, annot=True, cmap="Accent_r", cbar=False)
+    ax2.set_title(f"Policy: {title}")
+    ax2.set_xlabel("Player sum")
+    ax2.set_ylabel("Dealer showing")
+    ax2.set_xticklabels(range(12, 22))
+    ax2.set_yticklabels(["A"] + list(range(2, 11)), fontsize=12)
+
+    # add a legend
+    legend_elements = [
+        Patch(facecolor="lightgreen", edgecolor="black", label="Hit"),
+        Patch(facecolor="grey", edgecolor="black", label="Stick"),
+    ]
+    ax2.legend(handles=legend_elements, bbox_to_anchor=(1.3, 1))
+    return fig
