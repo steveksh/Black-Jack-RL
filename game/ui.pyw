@@ -56,7 +56,7 @@ class BlackjackUI:
         self.coin_image_blue = self._load_coin_image("images/blue-chip.png", (40, 40))
 
         # Game Status Mapper: 
-        self.status_mapper = {1:'✨✨ You Won ✨✨', 0: '💸💸 You Lost'}
+        self.status_mapper = {1:'✨✨ You Won ✨✨', -1: '💸💸 You Lost', 0: 'Push 🥶🥶🥶'}
         
         # arrow 
         self.arrow_image = self._load_coin_image("images/red-left arrow.png", (80, 40))
@@ -71,6 +71,7 @@ class BlackjackUI:
     def show_endgame_screen(self, result_text):
         self.hit_button.config(state="disabled")
         self.stick_button.config(state="disabled")
+        self.policy_button.config(state="disabled")
 
         # Disable buttons
         # Draw overlay
@@ -86,9 +87,9 @@ class BlackjackUI:
         image_path_map = {
             '✨✨ You Won ✨✨': "images/win.png",
             '💸💸 You Lost': "images/lose.png",
-            'Push (draw)': "images/push.png"
+            'Push 🥶🥶🥶': "images/push.png"
         }
-        result_img_path = image_path_map.get(result_text, "images/lose.png")
+        result_img_path = image_path_map.get(result_text, "images/push.png")
         img = Image.open(result_img_path).resize((550, 550))
         self.result_image = ImageTk.PhotoImage(img)
 
@@ -102,7 +103,7 @@ class BlackjackUI:
         # Countdown
         self.countdown_text = self.table_canvas.create_text(
             canvas_width // 2,
-            canvas_height // 2 + 170,
+            canvas_height // 2 + 190,
             text="NEXT GAME IN 3...",
             fill="black",
             font=("Roboto", 30, "bold"),
@@ -129,7 +130,7 @@ class BlackjackUI:
             self.engine._new_game()
             
             player_sum, dealer_card = self.engine.obs[0], self.engine.obs[1]
-            info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}"
+            info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}\n"
             self.refresh_layout(info_text, mode='sys')
             self.update_arrow('player')
 
@@ -262,12 +263,12 @@ class BlackjackUI:
         """ Function used to use the selected policy """
 
         # extract the state information from the game 
-        state = self.engine.obs
-        print(self.q.get(str(state)))
-        action = self.q.get(str(state), random.choice([0,1]))
+        action = self.q.get(str(self.obs), random.choice([0,1]))
+
+        selected = self.option_var.get()
 
         action_mapper = {1: 'hit', 0: 'stick'}
-        self.logger(f'Optimized policy says to: {action_mapper.get(action)}\n')
+        self.logger(f'{selected}\'s policy says to: {action_mapper.get(action)}\n')
 
         self.handle_action(action)
 
@@ -444,8 +445,6 @@ class BlackjackUI:
             self.table_canvas.delete("dealer-cards")
             buffer = 100
 
-        print(job_list)
-
         for i, f in enumerate(job_list):
             self.table_canvas.create_image(canvas_width/2.2 - buffer - len(revealed_cards) * 25 + i * canvas_width/10, 
                                             canvas_height / 8, 
@@ -465,10 +464,13 @@ class BlackjackUI:
 
         # Step through the game with the user action
         obs, reward, terminated, truncated, _ = self.engine.step(action)
+        self.engine.refresh()
+
+        self.obs = obs
         player_sum, dealer_card = obs[0], obs[1]
 
         # Display player's current state
-        info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}"
+        info_text = f"Player cards: {self.engine.player_hand} | Player Sum: {player_sum}\nDealer Hand: {dealer_card}\n"
         self.logger(info_text)
         self.refresh_layout(info_text)
 
@@ -483,13 +485,19 @@ class BlackjackUI:
             return True
             
         # If terminated, show dealer's full hand one card at a time (with delay)
-        elif terminated and player_sum <= 21:
+        elif terminated:
             self.hit_button.config(state="disabled")
             self.stick_button.config(state="disabled")
+            self.policy_button.config(state="disabled")
             
             self.logger("\nDealer's Hand Revealed:\n")
             self.update_arrow('dealer')
+            
+            # not sure why we need this... but the gym env and the game logic is not working properly at times?.. hardcoding this fix for now zzz
+            self.engine.step(0)
+            self.engine.refresh()
 
+            print(self.engine.dealer_hand)
             revealed_cards = []
             for idx, card in enumerate(self.engine.dealer_hand):
                 revealed_cards.append(card)
@@ -501,13 +509,30 @@ class BlackjackUI:
                 self.dealer_reveal(revealed_cards)
                 self.logger(f"{card}\n")
 
+                self.engine.step(0)
+                self.engine.refresh()
                 self.root.update()
                 time.sleep(1)
-
+                
             # Show game result
-            result_text = self.status_mapper.get(reward, 'Push (draw)')
-            self.winnings.append(reward)
+            dealer_sum = np.sum(revealed_cards)
+            dealer_sum = np.sum(revealed_cards)
 
+            # override the reward from env... its a bit buggy
+
+            if dealer_sum > 21:
+                reward = 1  # Dealer busts, player wins
+            elif dealer_sum == player_sum:
+                reward = 0  # Draw
+            elif dealer_sum < player_sum:
+                reward = 1  # Player wins
+            else:
+                reward = -1  # Dealer wins
+
+            result_text = self.status_mapper.get(reward, 'Push (draw)')
+
+            self.winnings.append(reward)
+            self.logger(f'Dealer Sum: {np.sum(revealed_cards)}\n')
             self.logger(f"\nGame Over — {result_text} (Reward: {reward})\n")
             self.logger(f"{'--'}"*50 + '\n')
             
