@@ -5,11 +5,13 @@ import json
 import random 
 
 import numpy as np
+import pandas as pd 
 
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
 
+import matplotlib
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
@@ -19,21 +21,24 @@ import seaborn as sns
 # Black Jack Env
 from GameEngine import GameEngine
 
+from modules.utils import generate_random_policy_grid
+
 class BlackjackUI:
     def __init__(self, root):
         self.root = root
 
+        # generate a random thing
+        generate_random_policy_grid()
+
         self.root.title("Blackjack RL - SDSC6007")
-        self.root.geometry("1500x900")
+        self.root.geometry("1500x700")
         self.root.protocol("WM_DELETE_WINDOW", lambda: (self.root.destroy(), sys.exit()))
         
         # RL Algorithms 
         self.policy_options = [("Random Policy", "Random_Policy"),
-                               ("Q-Learning", "Q_learning"),
                                ("Deep Q Learning", "Deep_Q_learning"),
                                ("Policy Gradient Actor + Critic", "AC_Policy_Gradient"),
                                ("Policy Gradient (batch updates)", "Batch_Policy_Gradient"),
-                               ("TRPO", "TRPO"),
                                ("PPO", "PPO"),
                                ("Basic Strategy", "basic_strategy")]
         
@@ -43,7 +48,7 @@ class BlackjackUI:
 
         # utils
         self.rank_map = {1: 'ace'}
-        self.winnings = [0]
+        self.winnings = []
 
         # Load the background image
         self.original_bg = Image.open("images/background6.png")
@@ -157,7 +162,7 @@ class BlackjackUI:
         for filename in os.listdir(folder):
             if filename.endswith(".png"):
                 path = os.path.join(folder, filename)
-                img = Image.open(path).resize((80, 120))
+                img = Image.open(path).resize((70, 110))
                 key = filename.replace(".png", "")
                 images[key] = ImageTk.PhotoImage(img)
         return images
@@ -182,6 +187,20 @@ class BlackjackUI:
         # Trend (top-right) – Make it larger
         self.trend = ttk.LabelFrame(self.root, text="Cumulative Winnings")
         self.trend.place(relx=0.62, rely=0.01, relwidth=0.37, relheight=0.4)
+
+        # toggles 
+        self.plot_mode = tk.StringVar(value="Cumulative")
+
+        plot_selector = ttk.OptionMenu(
+            self.trend,
+            self.plot_mode,
+            "Cumulative",  # default value
+            "Cumulative",
+            "Rolling Avg",
+            "Summary Bars",
+            command=lambda _: self.draw_dealer_distribution()
+        )
+        plot_selector.pack(anchor="ne", padx=0, pady=(2, 0))
 
         self.dealer_bar_frame = ttk.LabelFrame(self.root, text="Optimized Policy Selection")
         self.dealer_bar_frame.place(relx=0.62, rely=0.42, relwidth=0.37, relheight=0.28)
@@ -230,7 +249,7 @@ class BlackjackUI:
             relief="flat",
             cursor="hand2"              # Hand cursor on hover
         )
-        self.hit_button.place(relx=0.15, rely=0.9, relwidth=0.2, relheight=0.06)
+        self.hit_button.place(relx=0.05, rely=0.9, relwidth=0.2, relheight=0.06)
         self.hit_button.config(command=lambda: self.handle_action(1))
 
         # Stay button
@@ -243,7 +262,7 @@ class BlackjackUI:
             relief="flat",
             cursor="hand2"              # Hand cursor on hover
         )
-        self.stick_button.place(relx=0.4, rely=0.9, relwidth=0.2, relheight=0.06)
+        self.stick_button.place(relx=0.275, rely=0.9, relwidth=0.2, relheight=0.06)
         self.stick_button.config(command=lambda: self.handle_action(0))
         
         # Policy 
@@ -256,8 +275,88 @@ class BlackjackUI:
             relief="flat",              # Flat, modern style
             cursor="hand2"              # Hand cursor on hover
         )
-        self.policy_button.place(relx=0.65, rely=0.9, relwidth=0.2, relheight=0.06)
+        self.policy_button.place(relx=0.5, rely=0.9, relwidth=0.2, relheight=0.06)
         self.policy_button.config(command=lambda: self.use_policy())
+
+        # reset 
+        self.reset_button = tk.Button(
+            self.table_frame,
+            text="Reset",
+            bg="grey",               # Modern teal
+            fg="white",                 # White text
+            font=("Minecraftia", 12, "bold"),
+            relief="flat",              # Flat, modern style
+            cursor="hand2"              # Hand cursor on hover
+        )
+        self.reset_button.place(relx=0.75, rely=0.05, relwidth=0.2, relheight=0.06)
+        self.reset_button.config(command=lambda: self.reset_winnings())
+
+        # Stimulation
+        self.simulate_button = tk.Button(
+            self.table_frame,
+            text="Q* (1000 iters)",
+            bg="purple",
+            fg="white",
+            font=("Minecraftia", 12, "bold"),
+            relief="flat",
+            cursor="hand2"
+        )
+        self.simulate_button.place(relx=0.725, rely=0.9, relwidth=0.2, relheight=0.06)
+        self.simulate_button.config(command=self.run_qstar_simulation)
+    
+    def reset_winnings(self):
+        """  Reset Winnings """
+        
+        self.winnings = []
+        self.draw_dealer_distribution()
+
+    def run_qstar_simulation(self):
+        """Runs 1000 episodes using the selected Q* policy."""
+        self.hit_button.config(state="disabled")
+        self.stick_button.config(state="disabled")
+        self.policy_button.config(state="disabled")
+        self.simulate_button.config(state="disabled")
+
+        selected = self.option_var.get()
+        self.logger(f"\n[SIMULATION] Running 1000 games with policy: {selected}\n")
+
+        for i in range(1000):
+            self.engine._new_game()
+            self.obs = self.engine.obs
+            done = False
+
+            while not done:
+                action = self.q.get(str(self.obs), random.choice([0, 1]))
+                self.obs, reward, terminated, truncated, _ = self.engine.step(action)
+                done = terminated or truncated
+
+            # Final dealer reveal step for accurate result
+            self.engine.refresh()
+            player_sum = self.obs[0]
+            dealer_sum = sum(self.engine.dealer_hand)
+
+            # over-riding the reward
+            if dealer_sum == player_sum:
+                reward = 0
+            elif dealer_sum > player_sum:
+                reward = -1
+            else:
+                reward = 1
+
+            self.winnings.append(reward)
+            self.logger(f"Game {i+1}: Result -> {self.status_mapper.get(reward, 'Unknown')}\n")
+
+        self.draw_dealer_distribution()
+
+        # Re-enable buttons
+        self.hit_button.config(state="normal")
+        self.stick_button.config(state="normal")
+        self.policy_button.config(state="normal")
+        self.simulate_button.config(state="normal")
+
+        self.logger(f"\n[SIMULATION COMPLETE] Q* ran for 100 games.\n")
+        self.logger(f"{'--'}"*50 + '\n')
+
 
     def use_policy(self):
         """ Function used to use the selected policy """
@@ -277,6 +376,10 @@ class BlackjackUI:
     def update_option(self):
         """ Updated selections """
         selected = self.option_var.get()
+
+        if selected == 'Random_Policy':
+            generate_random_policy_grid()
+
         self.option = selected  # update internal policy variable
         self.logger(f"[INFO] Selected policy: {self.option}\n")
 
@@ -324,6 +427,8 @@ class BlackjackUI:
             Patch(facecolor="grey", edgecolor="black", label="Stick"),
         ]
         ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=7)
+
+        matplotlib.pyplot.close()
 
         self.show_plot_in_frame(fig)
 
@@ -546,41 +651,105 @@ class BlackjackUI:
             self.dealer_chart_canvas.get_tk_widget().destroy()
             self.dealer_chart_canvas = None
 
+        # Compute win/loss/draw stats
+        wins = self.winnings.count(1)
+        losses = self.winnings.count(-1)
+        draws = self.winnings.count(0)
+        total = len(self.winnings)
+
+        if total > 0:
+            win_rate = wins / total * 100
+            loss_rate = losses / total * 100
+            draw_rate = draws / total * 100
+        else:
+            win_rate = loss_rate = draw_rate = 0
+
+        # Add win/loss/draw text at top-right
+        summary_text = (
+            f"Win: {win_rate:.1f}%  "
+            f"Loss: {loss_rate:.1f}%  "
+            f"Draw: {draw_rate:.1f}%"
+        )
+
         # Create the figure and plot
         fig, ax = plt.subplots(figsize=(5, 3))
         x = np.arange(len(self.winnings))
-        y = np.cumsum(self.winnings)
+        mode = self.plot_mode.get()
 
-        # Plot the cumulative winnings
-        ax.plot(
-            x, y,
-            label="Cumulative Winnings",
-            color="#00eaff",              # bright cyan
-            linewidth=2.5,
-            marker="o",
-            markersize=5,
-            markerfacecolor="white"
-        )
+        if mode == "Cumulative":
+            y = np.cumsum(self.winnings)
+            ax.set_title("Cumulative Winnings", fontsize=10)
+            ax.axhline(
+                0,
+                color="#ff5555",              # soft red
+                linestyle="--",
+                linewidth=1.5,
+                label="Break-even"
+            )
+            ax.plot(x, y, label="Cumulative Winnings", color="#00eaff",            
+                linewidth=2.5,
+                marker="o",
+                markersize=5,
+                markerfacecolor="white")
+            
+        elif mode == "Rolling Avg":
+            ax.set_title("Rolling Average", fontsize=10)
+            y = pd.Series(self.winnings).rolling(window=50).mean()
+            ax.plot(x, y, label="Rolling Avg (50)", color="#00eaff",            
+                linewidth=2.5,
+                marker="o",
+                markersize=5,
+                markerfacecolor="white")
+            
+            ax.axhline(
+                0,
+                color="#ff5555",              # soft red
+                linestyle="--",
+                linewidth=1.5,
+                label="Break-even"
+            )
 
-        # Break-even line
-        ax.axhline(
-            0,
-            color="#ff5555",              # soft red
-            linestyle="--",
-            linewidth=1.5,
-            label="Break-even"
-        )
+        elif mode == "Summary Bars":
+            # Compute stats
+            wins = self.winnings.count(1)
+            losses = self.winnings.count(-1)
+            draws = self.winnings.count(0)
+            total = len(self.winnings)
+
+            counts = [wins, losses, draws]
+            labels = ["Win", "Loss", "Draw"]
+            colors = ["green", "red", "gray"]
+
+            ax.bar(labels, counts, color=colors)
+
+            ax.set_title("Game Outcome Distribution", fontsize=10)
+            ax.set_ylabel("Number of Games", fontsize=9)
 
         # Aesthetic updates
         ax.set_facecolor("#2b2b3d")
-        ax.set_title("Player Cumulative Winnings", color="black", 
-                     fontsize=8)
         ax.set_xlabel("Round", fontsize=8)
         ax.set_ylabel("Winnings", fontsize=8)
         ax.grid(color="#444444", linestyle="--", linewidth=0.5)
         ax.legend(facecolor="#2b2b3d", edgecolor="gray", 
                   labelcolor="white", loc="upper left",
                   fontsize=8)
+        
+        ax.text(
+            0.98, 0.95, summary_text,
+            transform=ax.transAxes,
+            fontsize=9,
+            color="white",
+            ha="right", va="top",
+            bbox=dict(facecolor="#333333", alpha=0.6, edgecolor="none", boxstyle="round,pad=0.4")
+        )
+        ax.text(
+            0.01, 0.02, f"Games Played: {total}",
+            transform=ax.transAxes,
+            fontsize=9,
+            color="white",
+            ha="left", va="bottom",
+            bbox=dict(facecolor="#333333", alpha=0.6, edgecolor="none", boxstyle="round,pad=0.4")
+        )
 
         fig.tight_layout()
 

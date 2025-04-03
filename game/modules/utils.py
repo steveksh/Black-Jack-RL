@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.patches import Patch
+import json
+from collections import defaultdict
 
 def create_grids(agent, usable_ace=False):
     """Create value and policy grid given an agent."""
@@ -106,3 +108,61 @@ def ui_create_plots(value_grid, policy_grid, title: str):
     ]
     ax2.legend(handles=legend_elements, bbox_to_anchor=(1.3, 1))
     return fig
+
+def basic_strategy(player_sum, dealer_card, usable_ace):
+    if usable_ace:
+        return 1 
+
+    if player_sum >= 17:
+        return 0  
+    elif 13 <= player_sum <= 16 and 2 <= dealer_card <= 6:
+        return 0  
+    elif player_sum == 12 and 4 <= dealer_card <= 6:
+        return 0 
+    else:
+        return 1
+
+def generate_basic_strategy_policy():
+    policy_data = {}
+
+    for player_sum in range(1, 22):           # 1 to 21
+        for dealer_card in range(1, 11):      # 1 (Ace) to 10
+            for usable_ace in [0, 1]:
+                action = basic_strategy(player_sum, dealer_card, usable_ace)
+                state = (player_sum, dealer_card, usable_ace)
+                policy_data[str(state)] = action
+
+    with open("../policies/Basic_Strategy.json", "w") as f:
+        json.dump(policy_data, f, indent=2)
+
+    return True
+
+def generate_random_policy_grid(seed=None):
+    """
+    Generates a 10x10 random policy grid (player_sum 12–21, dealer 1–10)
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    
+    # 10x10 grid: player sums 12–21, dealer 1–10
+    grid = np.random.choice([0, 1], size=(10, 10))
+
+    grid_to_policy_json(grid, "./policies/Random_Policy.json")
+    np.save('./checkpoints/Random_Policy.npy', grid)
+
+def grid_to_policy_json(grid, save_path):
+    """
+    Converts a 10x10 grid into a policy JSON that maps (player_sum, dealer_card, usable_ace) to action
+    """
+    policy_data = {}
+
+    for i, player_sum in enumerate(range(12, 22)):  # 12 to 21
+        for j, dealer_card in enumerate(range(1, 11)):  # 1 to 10
+            action = int(grid[i, j])
+            for usable_ace in [0, 1]:  # fill for both usable ace conditions
+                state = (player_sum, dealer_card, usable_ace)
+                policy_data[str(state)] = action
+
+    with open(save_path, "w") as f:
+        json.dump(policy_data, f, indent=2)
+
