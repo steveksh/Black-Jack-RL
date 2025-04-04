@@ -2,7 +2,9 @@ import time
 import os 
 import sys
 import json 
-import random 
+import random
+
+import torch
 
 import numpy as np
 import pandas as pd 
@@ -18,32 +20,39 @@ from matplotlib.patches import Patch
 
 import seaborn as sns
 
+# loading the balance PG shell 
+from models.BalancePG import BalancePG, generate_policy, create_grids
+
 # Black Jack Env
 from GameEngine import GameEngine
-
-from modules.utils import generate_random_policy_grid
 
 class BlackjackUI:
     def __init__(self, root):
         self.root = root
 
-        # generate a random thing
-        generate_random_policy_grid()
-
         self.root.title("Blackjack RL - SDSC6007")
-        self.root.geometry("1500x700")
+        self.root.geometry("1500x750")
         self.root.protocol("WM_DELETE_WINDOW", lambda: (self.root.destroy(), sys.exit()))
         
+        # money
+        self.money = 64
+        self.balance_pg = BalancePG(4,2,self.money)
+        self.balance_pg.load_state_dict(torch.load('./checkpoints/Balance_PG.pth'))
+        
         # RL Algorithms 
-        self.policy_options = [("Random Policy", "Random_Policy"),
-                               ("Deep Q Learning", "Deep_Q_learning"),
+        self.policy_options = [("Stand Only", "Stand_Only"),
+                               ("Deep Q Learning (No Counting Cards)", "Deep_Q_learning"),
+                               ("Policy Gradient (No Counting Cards)", "Batch_Policy_Gradient"),
+                               ("Policy Gradient (Balance Driven)", "Balance_PG"),
                                ("Policy Gradient Actor + Critic", "AC_Policy_Gradient"),
-                               ("Policy Gradient (batch updates)", "Batch_Policy_Gradient"),
                                ("PPO", "PPO"),
                                ("Basic Strategy", "basic_strategy")]
         
+        # coins 
+        self.coin_image = self._load_coin_image("images/coins.png", (50, 50)) 
+        
         # Load an initial Random Policy 
-        with open(f'./policies/Random_Policy.json', 'r') as f:
+        with open(f'./policies/Stand_Only.json', 'r') as f:
             self.q = json.load(f)
 
         # utils
@@ -55,10 +64,6 @@ class BlackjackUI:
 
         # Load card images 
         self.card_images = self.load_card_images("images")
-        
-        # Coins / Props 
-        self.coin_image_red = self._load_coin_image("images/coins.png", (40, 40))
-        self.coin_image_blue = self._load_coin_image("images/blue-chip.png", (40, 40))
 
         # Game Status Mapper: 
         self.status_mapper = {1:'✨✨ You Won ✨✨', -1: '💸💸 You Lost', 0: 'Push 🥶🥶🥶'}
@@ -77,6 +82,7 @@ class BlackjackUI:
         self.hit_button.config(state="disabled")
         self.stick_button.config(state="disabled")
         self.policy_button.config(state="disabled")
+        self.simulate_button.config(state="disabled")
 
         # Disable buttons
         # Draw overlay
@@ -127,6 +133,8 @@ class BlackjackUI:
             self.hit_button.config(state="disable")
             self.stick_button.config(state="disable")
             self.policy_button.config(state="disable")
+            self.simulate_button.config(state="disabled")
+
         else:
             self.table_canvas.itemconfigure(self.countdown_text, text="Starting new game...")
 
@@ -143,6 +151,7 @@ class BlackjackUI:
             self.hit_button.config(state="normal")
             self.stick_button.config(state="normal")
             self.policy_button.config(state="normal")
+            self.simulate_button.config(state="normal")
 
     def hide_endgame_screen(self):
         self.table_canvas.delete("endgame")
@@ -156,6 +165,7 @@ class BlackjackUI:
         self.hit_button.config(state="active")
         self.stick_button.config(state="active")
         self.policy_button.config(state="active")
+        self.simulate_button.config(state="active")
 
     def load_card_images(self, folder):
         images = {}
@@ -212,7 +222,7 @@ class BlackjackUI:
         self.plot_frame = ttk.Frame(self.dealer_bar_frame, style="White.TFrame")
         self.plot_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
-        self.option_var = tk.StringVar(value="Random_Policy")  # default option
+        self.option_var = tk.StringVar(value="Stand_Only")  # default option
 
         # Define the policy options
         # Add radio buttons inside the dealer_bar_frame
@@ -288,13 +298,13 @@ class BlackjackUI:
             relief="flat",              # Flat, modern style
             cursor="hand2"              # Hand cursor on hover
         )
-        self.reset_button.place(relx=0.75, rely=0.05, relwidth=0.2, relheight=0.06)
+        self.reset_button.place(relx=0.725, rely=0.825, relwidth=0.2, relheight=0.06)
         self.reset_button.config(command=lambda: self.reset_winnings())
 
         # Stimulation
         self.simulate_button = tk.Button(
             self.table_frame,
-            text="Q* (1000 iters)",
+            text="Q* (50 iters)",
             bg="purple",
             fg="white",
             font=("Minecraftia", 12, "bold"),
@@ -308,19 +318,21 @@ class BlackjackUI:
         """  Reset Winnings """
         
         self.winnings = []
+        self.money = 64
         self.draw_dealer_distribution()
+        self.table_canvas.itemconfigure("money-text", text=f"{self.money}")
 
     def run_qstar_simulation(self):
-        """Runs 1000 episodes using the selected Q* policy."""
+        """Runs K episodes using the selected Q* policy."""
         self.hit_button.config(state="disabled")
         self.stick_button.config(state="disabled")
         self.policy_button.config(state="disabled")
         self.simulate_button.config(state="disabled")
 
         selected = self.option_var.get()
-        self.logger(f"\n[SIMULATION] Running 1000 games with policy: {selected}\n")
+        self.logger(f"\n[SIMULATION] Running 50 games with policy: {selected}\n")
 
-        for i in range(1000):
+        for i in range(50):
             self.engine._new_game()
             self.obs = self.engine.obs
             done = False
@@ -343,10 +355,22 @@ class BlackjackUI:
             else:
                 reward = 1
 
+            self.money += reward
+
+            # update PG
+            policy = self.update_balance_pg('Balance_PG')
+
+            if selected == 'Balance_PG':
+                print('Updating Balance PG...')
+                self.q = generate_policy(self.balance_pg, self.money)
+                self.grid_plots('Balance_PG', policy)
+                self.root.update()
+            
             self.winnings.append(reward)
             self.logger(f"Game {i+1}: Result -> {self.status_mapper.get(reward, 'Unknown')}\n")
 
         self.draw_dealer_distribution()
+        self.table_canvas.itemconfigure("money-text", text=f"{self.money}")
 
         # Re-enable buttons
         self.hit_button.config(state="normal")
@@ -354,7 +378,7 @@ class BlackjackUI:
         self.policy_button.config(state="normal")
         self.simulate_button.config(state="normal")
 
-        self.logger(f"\n[SIMULATION COMPLETE] Q* ran for 100 games.\n")
+        self.logger(f"\n[SIMULATION COMPLETE] Q* ran for 50 games.\n")
         self.logger(f"{'--'}"*50 + '\n')
 
 
@@ -373,23 +397,41 @@ class BlackjackUI:
 
         return True
     
+    def update_balance_pg(self, selected):
+        """ Function used to update balance pg"""
+
+        self.balance_pg = BalancePG(4,2,self.money)
+        self.balance_pg.load_state_dict(torch.load('./checkpoints/Balance_PG.pth'))
+
+        # generate plots 
+        self.balance_pg.generate_q_table(usable_ace= True,starting_pos=12)
+        _, policy = create_grids(self.balance_pg, usable_ace=True)
+
+        return policy
+    
     def update_option(self):
         """ Updated selections """
         selected = self.option_var.get()
 
-        if selected == 'Random_Policy':
-            generate_random_policy_grid()
-
         self.option = selected  # update internal policy variable
         self.logger(f"[INFO] Selected policy: {self.option}\n")
 
-        # update plots 
-        self.policy = np.load(f'./checkpoints/{selected}.npy')
-        self.grid_plots(selected, self.policy)
+        if selected == 'Balance_PG':
+            
+            # generate policy 
+            self.policy = self.update_balance_pg('Balance_PG')
+            self.grid_plots(selected, self.policy)
+            self.q = generate_policy(self.balance_pg, self.money)
 
-        # load optimized policy         
-        with open(f'./policies/{selected}.json', 'r') as f:
-            self.q = json.load(f)
+        else:
+
+            # update plots 
+            self.policy = np.load(f'./checkpoints/{selected}.npy')
+            self.grid_plots(selected, self.policy)
+
+            # load optimized policy         
+            with open(f'./policies/{selected}.json', 'r') as f:
+                self.q = json.load(f)
 
     def grid_plots(self, title, policy_grid):
         fig, ax = plt.subplots(figsize=(4, 2.5))  # Smaller and wider
@@ -470,6 +512,7 @@ class BlackjackUI:
             self.create_text(canvas_width, canvas_height, info_text)
 
         self.display_cards()
+        self.table_canvas.itemconfigure("money-text", text=f"{self.money}")
 
     def update_arrow(self,mode='dealer'):
         self.table_canvas.delete("arrow")
@@ -586,6 +629,7 @@ class BlackjackUI:
             self.logger(f"{'--'}"*50 + '\n')
 
             self.winnings.append(reward)
+            self.money -= 1
 
             return True
             
@@ -594,6 +638,7 @@ class BlackjackUI:
             self.hit_button.config(state="disabled")
             self.stick_button.config(state="disabled")
             self.policy_button.config(state="disabled")
+            self.simulate_button.config(state="disabled")
             
             self.logger("\nDealer's Hand Revealed:\n")
             self.update_arrow('dealer')
@@ -635,6 +680,7 @@ class BlackjackUI:
                 reward = -1  # Dealer wins
 
             result_text = self.status_mapper.get(reward, 'Push (draw)')
+            self.money += reward
 
             self.winnings.append(reward)
             self.logger(f'Dealer Sum: {np.sum(revealed_cards)}\n')
@@ -693,9 +739,9 @@ class BlackjackUI:
                 markerfacecolor="white")
             
         elif mode == "Rolling Avg":
-            ax.set_title("Rolling Average", fontsize=10)
-            y = pd.Series(self.winnings).rolling(window=50).mean()
-            ax.plot(x, y, label="Rolling Avg (50)", color="#00eaff",            
+            ax.set_title("Rolling Average (10)", fontsize=10)
+            y = pd.Series(self.winnings).rolling(window=10).mean()
+            ax.plot(x, y, label="Rolling Avg (10)", color="#00eaff",            
                 linewidth=2.5,
                 marker="o",
                 markersize=5,
@@ -787,6 +833,26 @@ class BlackjackUI:
         # Observation display
         self.draw_game_state(event)
         self.draw_dealer_distribution()
+
+        # Redraw the coin image
+        self.coin_image_id = self.table_canvas.create_image(
+            event.width - 120, 20,  # top-right corner padding
+            anchor="nw",
+            image=self.coin_image,
+            tags="money-coin"
+        )
+
+        # Redraw the money text next to the coin
+        self.money_text_id = self.table_canvas.create_text(
+            event.width - 60, 30,
+            anchor="nw",
+            text=f"{self.money}",
+            font=("Helvetica", 18, "bold"),
+            fill="yellow",
+            tags="money-text"
+        )
+
+
 
 if __name__ == "__main__":
     root = tk.Tk()
