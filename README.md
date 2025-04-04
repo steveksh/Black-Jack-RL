@@ -5,6 +5,23 @@ SDSC 6007 - Reinforcement Learning
 
 install everything in ./game/requirements.txt
 ```
+# if your windows 
+python3 -m venv env 
+cd ../env/Scripts
+activate 
+cd ../../game
+
+# if linux
+python3 -m venv env
+source ./env/Scripts/activate
+
+
+# launch game
+cd ./game
 pip install -r ./game/requirements.txt
-python ./game/ui.py
+python ./game/ui.pyw
 ```
+
+
+## Screenshots
+![](./images/screenshot.png)
