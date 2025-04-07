@@ -7,7 +7,7 @@ install everything in ./game/requirements.txt
 ```
 # if your windows 
 python3 -m venv env 
-cd ../env/Scripts
+cd ./env/Scripts
 activate 
 cd ../../game
 
@@ -24,4 +24,4 @@ python ./game/ui.pyw
 
 
 ## Screenshots
-![](./images/screenshot.png)
+![](./games/images/screenshot.png)

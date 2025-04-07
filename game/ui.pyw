@@ -35,7 +35,7 @@ class BlackjackUI:
         self.root.protocol("WM_DELETE_WINDOW", lambda: (self.root.destroy(), sys.exit()))
         
         # money
-        self.money = 64
+        self.money = 65
         self.balance_pg = BalancePG(4,2,self.money)
         self.balance_pg.load_state_dict(torch.load('./checkpoints/Balance_PG.pth'))
         
@@ -44,8 +44,8 @@ class BlackjackUI:
                                ("Deep Q Learning (No Counting Cards)", "Deep_Q_learning"),
                                ("Policy Gradient (No Counting Cards)", "Batch_Policy_Gradient"),
                                ("Policy Gradient (Balance Driven)", "Balance_PG"),
-                               ("Policy Gradient Actor + Critic", "AC_Policy_Gradient"),
-                               ("PPO", "PPO"),
+                               ("PPO (No Counting Cards)", "PPO_No_Counting_Cards"),
+                               ("PPO (Counting Cards)", "PPO_Counting_Cards"),
                                ("Basic Strategy", "basic_strategy")]
         
         # coins 
