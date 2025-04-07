@@ -125,6 +125,18 @@ class BlackjackUI:
         self.table_canvas.tag_raise("endgame")
         self.countdown_timer(3)
 
+        # update Balance_PG
+        selected = self.option_var.get()
+
+        # update PG
+        policy = self.update_balance_pg('Balance_PG')
+
+        if selected == 'Balance_PG':
+            print('Updating Balance PG...')
+            self.q = generate_policy(self.balance_pg, self.money)
+            self.grid_plots('Balance_PG', policy)
+            self.root.update()
+
     def countdown_timer(self, seconds):
         if seconds > 0:
             self.table_canvas.itemconfigure(self.countdown_text, text=f"NEXT GAME IN {seconds}...")

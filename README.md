@@ -24,4 +24,4 @@ python ./game/ui.pyw
 
 
 ## Screenshots
-![](./games/images/screenshot.png)
+![](./game/images/screenshot.png)
