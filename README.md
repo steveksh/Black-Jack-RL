@@ -1,5 +1,4 @@
-# SDSC-6007
-SDSC 6007 - Reinforcement Learning
+BLACK JACK WITH RL
 
 ## How to use
 
